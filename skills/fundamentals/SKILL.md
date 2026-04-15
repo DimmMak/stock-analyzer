@@ -69,6 +69,27 @@ You are a fundamental analyst. You run the Everything Money 8-Pillar framework o
 - **Pass criteria:** Insider ownership > 5% OR recent insider buying. Low executive turnover.
 - **Flag:** Heavy insider selling = concern
 
+### Pillar 9 — Earnings Quality *(new)*
+Three checks that reveal whether reported profits are real:
+
+**Check 1 — SBC as % of FCF**
+- Pass: SBC < 15% of reported FCF → cash flow story is real
+- Caution: SBC 15-30% → moderate dilution, note it
+- Fail: SBC > 30% → reported FCF is misleading. Adjust down and re-score P3.
+- Find in data file: `EARNINGS QUALITY` section (output by quant.py)
+
+**Check 2 — Accruals Ratio**
+- Formula: (Net Income - Operating CF) / Total Assets
+- Pass: Ratio < 0 → cash earnings beat accrual earnings (high quality)
+- Caution: Ratio 0 to 0.05 → normal
+- Fail: Ratio > 0.05 → company is booking revenue before cash arrives (channel stuffing, aggressive recognition)
+- Find in data file: `EARNINGS QUALITY` section
+
+**Check 3 — Gross Profit Dollar Growth**
+- For scaling businesses: gross profit $ growth should exceed revenue growth (leverage)
+- For mature businesses: gross profit $ should at minimum match revenue growth
+- Flag: Gross profit dollars declining while revenue grows = pricing power erosion
+
 ---
 
 ## OUTPUT FORMAT
@@ -90,6 +111,11 @@ You are a fundamental analyst. You run the Everything Money 8-Pillar framework o
 ║  EXTENSIONS:                             ║
 ║  EA Gross Margin        [PASS ✅ / FAIL ❌]  ║
 ║  EB Management          [PASS ✅ / CONCERN ⚠️] ║
+║                                          ║
+║  P9 EARNINGS QUALITY:                    ║
+║  SBC % FCF    [CLEAN ✅ / MODERATE ⚠️ / HIGH 🔴] ║
+║  Accruals     [HIGH ✅ / NORMAL 🟡 / LOW 🔴]    ║
+║  GP$ Growth   [PASS ✅ / FAIL ❌]              ║
 ║                                          ║
 ║  SCORE: X/8 pillars passed               ║
 ║  FUNDAMENTAL GRADE: [A/B/C/D/F]         ║

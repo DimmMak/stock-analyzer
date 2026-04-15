@@ -23,7 +23,7 @@ Definition: User wants a fast signal, not a full report.
 
 **TYPE 2 — FULL ANALYSIS**
 Triggers: "full analysis", "deep dive", "complete analysis", "everything", "hedge fund", "run it all"
-Definition: User wants the complete 8-agent pipeline. No shortcuts.
+Definition: User wants the complete pipeline including macro context. No shortcuts.
 
 **TYPE 3 — SPECIFIC QUESTION**
 Triggers: "technical setup", "options for", "valuation", "fundamentals only", "what's the RSI", "DCF", "price target", "sentiment on"
@@ -60,9 +60,18 @@ Depth lost: Monte Carlo, DCF, sentiment detail, options plays
 
 **TYPE 2 — FULL ANALYSIS**
 ```
-Route: .intake → .fundamentals → .quant → .technicals → .sentiment → .valuation → .risk → .options → .verdict
+Route: .macro → .intake → .fundamentals → .quant → .technicals → .sentiment → .valuation → .risk → .options → .verdict
 Skip:  nothing
 Token savings: 0% (intentional — user asked for it)
+```
+
+**TYPE 0 — MACRO ONLY**
+Triggers: "macro", "market environment", "risk on", "risk off", "what's the market doing", "rates", "sector rotation"
+Definition: User wants macro context only. No stock analysis.
+```
+Route: .macro only
+Skip:  everything else
+Token savings: ~95%
 ```
 
 **TYPE 3 — SPECIFIC QUESTION**

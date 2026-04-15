@@ -258,15 +258,33 @@ def run_quant_analysis(ticker_symbol):
         print("  ⚠️  No price data")
         return None
 
-    # ── DCF ──
-    print("  → DCF model...")
-    fcf = info.get('freeCashflow', 0) or 0
+    # ── SBC-ADJUSTED FCF ──
+    print("  → Calculating SBC-adjusted FCF...")
+    fcf_raw = info.get('freeCashflow', 0) or 0
+    sbc = 0
+    try:
+        cashflow = ticker.cashflow
+        if cashflow is not None and not cashflow.empty:
+            sbc_keys = ['Stock Based Compensation', 'StockBasedCompensation',
+                        'Share Based Compensation', 'ShareBasedCompensation']
+            for key in sbc_keys:
+                if key in cashflow.index:
+                    sbc_val = cashflow.loc[key].iloc[0]
+                    if pd.notna(sbc_val):
+                        sbc = abs(float(sbc_val))
+                        break
+    except Exception:
+        sbc = 0
+
+    fcf = max(fcf_raw - sbc, 0) if fcf_raw > 0 else fcf_raw
+    sbc_pct_fcf = (sbc / fcf_raw * 100) if fcf_raw > 0 else 0
+
     shares = info.get('sharesOutstanding', 0) or 0
     revenue_growth = info.get('revenueGrowth', 0.10) or 0.10
     earnings_growth = info.get('earningsGrowth', 0.10) or 0.10
     avg_growth = (revenue_growth + earnings_growth) / 2
 
-    # Conservative / Base / Optimistic scenarios
+    # Conservative / Base / Optimistic scenarios (using SBC-adjusted FCF)
     dcf_bear = calculate_dcf(fcf, max(avg_growth * 0.5, 0.02), 0.02, 0.12, shares) if fcf > 0 else None
     dcf_base = calculate_dcf(fcf, max(avg_growth, 0.05), 0.025, 0.10, shares) if fcf > 0 else None
     dcf_bull = calculate_dcf(fcf, min(avg_growth * 1.5, 0.30), 0.03, 0.09, shares) if fcf > 0 else None
@@ -343,8 +361,8 @@ def run_quant_analysis(ticker_symbol):
         if dcf_bull:
             upside_bull = ((dcf_bull['intrinsic_value'] - current_price) / current_price) * 100
             lines.append(f"| 🐂 Bull Case | {min(avg_growth * 1.5, 0.30)*100:.1f}% | ${dcf_bull['intrinsic_value']:.2f} | {'Over' if upside_bull < 0 else 'Under'}valued | {upside_bull:+.1f}% |")
-        lines.append(f"\n*DCF Assumptions: WACC Bear 12% / Base 10% / Bull 9% | Terminal Growth 2-3% | Based on FCF TTM*")
-        lines.append(f"*FCF used: ${fcf/1e9:.2f}B | Shares: {shares/1e9:.2f}B*")
+        lines.append(f"\n*DCF Assumptions: WACC Bear 12% / Base 10% / Bull 9% | Terminal Growth 2-3% | Based on SBC-Adjusted FCF*")
+        lines.append(f"*FCF (raw): ${fcf_raw/1e9:.2f}B | SBC: ${sbc/1e9:.2f}B | FCF (adj): ${fcf/1e9:.2f}B | SBC as % of raw FCF: {sbc_pct_fcf:.1f}% | Shares: {shares/1e9:.2f}B*")
     else:
         lines.append("⚠️ DCF not available — negative or zero Free Cash Flow")
 
@@ -360,6 +378,39 @@ def run_quant_analysis(ticker_symbol):
         lines.append(f"| 10th (Worst 10%) | ${mc_results['p10']:.2f} | {((mc_results['p10']-mc_results['current'])/mc_results['current']*100):+.1f}% |")
         lines.append(f"\n- **Probability of Positive Return (1Y):** {mc_results['prob_positive']:.1f}%")
         lines.append(f"- **Expected Value:** ${mc_results['mean']:.2f}")
+
+    # Earnings Quality
+    lines.append("\n---\n## 🔬 EARNINGS QUALITY")
+    if fcf_raw > 0:
+        if sbc_pct_fcf < 15:
+            sbc_flag = "🟢 Clean — SBC not distorting FCF"
+        elif sbc_pct_fcf < 30:
+            sbc_flag = "🟡 Moderate — monitor SBC dilution"
+        else:
+            sbc_flag = "🔴 High — real FCF significantly lower than reported"
+        lines.append(f"- **Reported FCF:** ${fcf_raw/1e9:.2f}B")
+        lines.append(f"- **Stock-Based Compensation (SBC):** ${sbc/1e9:.2f}B")
+        lines.append(f"- **SBC-Adjusted FCF:** ${fcf/1e9:.2f}B")
+        lines.append(f"- **SBC as % of FCF:** {sbc_pct_fcf:.1f}% — {sbc_flag}")
+    else:
+        lines.append("- FCF data not available for earnings quality analysis")
+
+    # Operating CF vs Net Income (accruals quality)
+    try:
+        op_cf = info.get('operatingCashflow', 0) or 0
+        net_income = info.get('netIncomeToCommon', 0) or 0
+        total_assets = info.get('totalAssets', 1) or 1
+        if op_cf and net_income and total_assets:
+            accruals_ratio = (net_income - op_cf) / total_assets
+            if accruals_ratio < -0.05:
+                accruals_flag = "🟢 High quality — cash earnings exceed accruals"
+            elif accruals_ratio < 0.05:
+                accruals_flag = "🟡 Neutral — normal accruals level"
+            else:
+                accruals_flag = "🔴 Low quality — accruals exceeding cash earnings"
+            lines.append(f"- **Accruals Ratio:** {accruals_ratio:.3f} — {accruals_flag}")
+    except Exception:
+        pass
 
     # Risk Metrics
     lines.append("\n---\n## ⚠️ RISK METRICS")
