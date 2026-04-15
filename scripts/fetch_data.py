@@ -1,0 +1,401 @@
+#!/usr/bin/env python3
+"""
+fetch_data.py — Main data fetcher for Stock Analyzer
+Pulls all necessary data from Yahoo Finance via yfinance
+Outputs a clean structured markdown file to data/{TICKER}_data.md
+
+Usage: python3 fetch_data.py AAPL
+"""
+
+import yfinance as yf
+import pandas as pd
+import numpy as np
+from datetime import datetime
+import sys
+import os
+import warnings
+warnings.filterwarnings('ignore')
+
+
+def safe_get(d, key, default='N/A'):
+    """Safely get a value from a dict"""
+    try:
+        val = d.get(key, default)
+        if val is None:
+            return default
+        return val
+    except Exception:
+        return default
+
+
+def format_number(n, prefix='', suffix='', decimals=2):
+    """Format large numbers for readability"""
+    try:
+        n = float(n)
+        if abs(n) >= 1e12:
+            return f"{prefix}{n/1e12:.{decimals}f}T{suffix}"
+        elif abs(n) >= 1e9:
+            return f"{prefix}{n/1e9:.{decimals}f}B{suffix}"
+        elif abs(n) >= 1e6:
+            return f"{prefix}{n/1e6:.{decimals}f}M{suffix}"
+        else:
+            return f"{prefix}{n:,.{decimals}f}{suffix}"
+    except Exception:
+        return 'N/A'
+
+
+def fetch_stock_data(ticker_symbol):
+    ticker_symbol = ticker_symbol.upper().strip()
+    print(f"\n📊 Fetching data for {ticker_symbol}...")
+
+    ticker = yf.Ticker(ticker_symbol)
+
+    # --- Price History ---
+    print("  → Price history...")
+    try:
+        hist_5y = ticker.history(period='5y')
+        hist_1y = ticker.history(period='1y')
+        hist_3m = ticker.history(period='3mo')
+    except Exception as e:
+        print(f"  ⚠️  Price history error: {e}")
+        hist_5y = hist_1y = hist_3m = pd.DataFrame()
+
+    # --- Company Info ---
+    print("  → Company info...")
+    try:
+        info = ticker.info
+    except Exception:
+        info = {}
+
+    # --- Financials ---
+    print("  → Financials...")
+    try:
+        financials = ticker.financials
+    except Exception:
+        financials = pd.DataFrame()
+
+    try:
+        balance_sheet = ticker.balance_sheet
+    except Exception:
+        balance_sheet = pd.DataFrame()
+
+    try:
+        cashflow = ticker.cashflow
+    except Exception:
+        cashflow = pd.DataFrame()
+
+    try:
+        quarterly_financials = ticker.quarterly_financials
+    except Exception:
+        quarterly_financials = pd.DataFrame()
+
+    try:
+        quarterly_cashflow = ticker.quarterly_cashflow
+    except Exception:
+        quarterly_cashflow = pd.DataFrame()
+
+    # --- Analyst Data ---
+    print("  → Analyst data...")
+    try:
+        recommendations = ticker.recommendations
+        if recommendations is not None and not recommendations.empty:
+            recommendations = recommendations.tail(20)
+    except Exception:
+        recommendations = pd.DataFrame()
+
+    # --- Holders ---
+    print("  → Institutional holders...")
+    try:
+        institutional = ticker.institutional_holders
+    except Exception:
+        institutional = pd.DataFrame()
+
+    try:
+        major_holders = ticker.major_holders
+    except Exception:
+        major_holders = pd.DataFrame()
+
+    # --- Options ---
+    print("  → Options chain...")
+    calls = pd.DataFrame()
+    puts = pd.DataFrame()
+    nearest_exp = 'N/A'
+    try:
+        options_dates = ticker.options
+        if options_dates and len(options_dates) > 0:
+            nearest_exp = options_dates[0]
+            chain = ticker.option_chain(nearest_exp)
+            calls = chain.calls.head(15)
+            puts = chain.puts.head(15)
+    except Exception:
+        pass
+
+    return {
+        'ticker': ticker_symbol,
+        'info': info,
+        'hist_5y': hist_5y,
+        'hist_1y': hist_1y,
+        'hist_3m': hist_3m,
+        'financials': financials,
+        'balance_sheet': balance_sheet,
+        'cashflow': cashflow,
+        'quarterly_financials': quarterly_financials,
+        'quarterly_cashflow': quarterly_cashflow,
+        'recommendations': recommendations,
+        'institutional': institutional,
+        'major_holders': major_holders,
+        'calls': calls,
+        'puts': puts,
+        'options_expiry': nearest_exp
+    }
+
+
+def build_markdown(data):
+    ticker = data['ticker']
+    info = data['info']
+    hist_5y = data['hist_5y']
+    hist_1y = data['hist_1y']
+    hist_3m = data['hist_3m']
+    financials = data['financials']
+    balance_sheet = data['balance_sheet']
+    cashflow = data['cashflow']
+    quarterly_financials = data['quarterly_financials']
+    quarterly_cashflow = data['quarterly_cashflow']
+    recommendations = data['recommendations']
+    institutional = data['institutional']
+    major_holders = data['major_holders']
+    calls = data['calls']
+    puts = data['puts']
+    options_expiry = data['options_expiry']
+
+    now = datetime.now().strftime('%Y-%m-%d %H:%M')
+    lines = []
+
+    # ── HEADER ──────────────────────────────────────────────
+    lines.append(f"# STOCK ANALYSIS DATA — {ticker} — {now}")
+    lines.append(f"\n*Auto-generated by fetch_data.py | Source: Yahoo Finance*\n")
+    lines.append("---")
+
+    # ── COMPANY OVERVIEW ────────────────────────────────────
+    lines.append("\n## COMPANY OVERVIEW")
+    lines.append(f"- **Name:** {safe_get(info, 'longName')}")
+    lines.append(f"- **Ticker:** {ticker}")
+    lines.append(f"- **Sector:** {safe_get(info, 'sector')}")
+    lines.append(f"- **Industry:** {safe_get(info, 'industry')}")
+    lines.append(f"- **Country:** {safe_get(info, 'country')}")
+    lines.append(f"- **Employees:** {safe_get(info, 'fullTimeEmployees'):,}" if isinstance(safe_get(info, 'fullTimeEmployees'), int) else f"- **Employees:** {safe_get(info, 'fullTimeEmployees')}")
+    lines.append(f"- **Description:** {safe_get(info, 'longBusinessSummary', 'N/A')[:300]}...")
+
+    # ── PRICE DATA ──────────────────────────────────────────
+    lines.append("\n---\n## PRICE DATA")
+    current_price = safe_get(info, 'currentPrice') or safe_get(info, 'regularMarketPrice')
+    lines.append(f"- **Current Price:** ${current_price}")
+    lines.append(f"- **Previous Close:** ${safe_get(info, 'previousClose')}")
+    lines.append(f"- **52wk High:** ${safe_get(info, 'fiftyTwoWeekHigh')}")
+    lines.append(f"- **52wk Low:** ${safe_get(info, 'fiftyTwoWeekLow')}")
+    lines.append(f"- **50-Day MA:** ${safe_get(info, 'fiftyDayAverage')}")
+    lines.append(f"- **200-Day MA:** ${safe_get(info, 'twoHundredDayAverage')}")
+    lines.append(f"- **Market Cap:** {format_number(safe_get(info, 'marketCap'), prefix='$')}")
+    lines.append(f"- **Volume:** {format_number(safe_get(info, 'volume'))}")
+    lines.append(f"- **Avg Volume (10d):** {format_number(safe_get(info, 'averageVolume10days'))}")
+    lines.append(f"- **Beta:** {safe_get(info, 'beta')}")
+
+    # Price performance
+    if not hist_1y.empty:
+        price_1y_ago = hist_1y['Close'].iloc[0]
+        price_now = hist_1y['Close'].iloc[-1]
+        perf_1y = ((price_now - price_1y_ago) / price_1y_ago) * 100
+        lines.append(f"- **1Y Performance:** {perf_1y:.1f}%")
+
+    if not hist_3m.empty:
+        price_3m_ago = hist_3m['Close'].iloc[0]
+        price_now_3m = hist_3m['Close'].iloc[-1]
+        perf_3m = ((price_now_3m - price_3m_ago) / price_3m_ago) * 100
+        lines.append(f"- **3M Performance:** {perf_3m:.1f}%")
+
+    # ── VALUATION METRICS ───────────────────────────────────
+    lines.append("\n---\n## VALUATION METRICS")
+    lines.append(f"- **P/E Ratio (TTM):** {safe_get(info, 'trailingPE')}")
+    lines.append(f"- **Forward P/E:** {safe_get(info, 'forwardPE')}")
+    lines.append(f"- **PEG Ratio:** {safe_get(info, 'pegRatio')}")
+    lines.append(f"- **P/S Ratio:** {safe_get(info, 'priceToSalesTrailing12Months')}")
+    lines.append(f"- **P/B Ratio:** {safe_get(info, 'priceToBook')}")
+    lines.append(f"- **EV/EBITDA:** {safe_get(info, 'enterpriseToEbitda')}")
+    lines.append(f"- **EV/Revenue:** {safe_get(info, 'enterpriseToRevenue')}")
+    lines.append(f"- **Enterprise Value:** {format_number(safe_get(info, 'enterpriseValue'), prefix='$')}")
+
+    # ── PROFITABILITY ────────────────────────────────────────
+    lines.append("\n---\n## PROFITABILITY & MARGINS")
+    lines.append(f"- **Gross Margin:** {safe_get(info, 'grossMargins', 0)*100:.1f}%" if isinstance(safe_get(info, 'grossMargins'), float) else f"- **Gross Margin:** N/A")
+    lines.append(f"- **Operating Margin:** {safe_get(info, 'operatingMargins', 0)*100:.1f}%" if isinstance(safe_get(info, 'operatingMargins'), float) else f"- **Operating Margin:** N/A")
+    lines.append(f"- **Profit Margin:** {safe_get(info, 'profitMargins', 0)*100:.1f}%" if isinstance(safe_get(info, 'profitMargins'), float) else f"- **Profit Margin:** N/A")
+    lines.append(f"- **ROE:** {safe_get(info, 'returnOnEquity', 0)*100:.1f}%" if isinstance(safe_get(info, 'returnOnEquity'), float) else f"- **ROE:** N/A")
+    lines.append(f"- **ROA:** {safe_get(info, 'returnOnAssets', 0)*100:.1f}%" if isinstance(safe_get(info, 'returnOnAssets'), float) else f"- **ROA:** N/A")
+    lines.append(f"- **ROIC (approx):** Calculated in quant.py")
+    lines.append(f"- **Revenue (TTM):** {format_number(safe_get(info, 'totalRevenue'), prefix='$')}")
+    lines.append(f"- **EBITDA:** {format_number(safe_get(info, 'ebitda'), prefix='$')}")
+    lines.append(f"- **Net Income:** {format_number(safe_get(info, 'netIncomeToCommon'), prefix='$')}")
+    lines.append(f"- **EPS (TTM):** ${safe_get(info, 'trailingEps')}")
+    lines.append(f"- **Forward EPS:** ${safe_get(info, 'forwardEps')}")
+    lines.append(f"- **EPS Growth (YoY):** {safe_get(info, 'earningsGrowth', 0)*100:.1f}%" if isinstance(safe_get(info, 'earningsGrowth'), float) else "- **EPS Growth (YoY):** N/A")
+    lines.append(f"- **Revenue Growth (YoY):** {safe_get(info, 'revenueGrowth', 0)*100:.1f}%" if isinstance(safe_get(info, 'revenueGrowth'), float) else "- **Revenue Growth (YoY):** N/A")
+
+    # ── BALANCE SHEET ────────────────────────────────────────
+    lines.append("\n---\n## BALANCE SHEET")
+    lines.append(f"- **Total Cash:** {format_number(safe_get(info, 'totalCash'), prefix='$')}")
+    lines.append(f"- **Total Debt:** {format_number(safe_get(info, 'totalDebt'), prefix='$')}")
+    lines.append(f"- **Net Cash/Debt:** {format_number(safe_get(info, 'totalCash', 0) - safe_get(info, 'totalDebt', 0) if isinstance(safe_get(info, 'totalCash'), (int, float)) and isinstance(safe_get(info, 'totalDebt'), (int, float)) else 'N/A', prefix='$')}")
+    lines.append(f"- **Debt/Equity:** {safe_get(info, 'debtToEquity')}")
+    lines.append(f"- **Current Ratio:** {safe_get(info, 'currentRatio')}")
+    lines.append(f"- **Quick Ratio:** {safe_get(info, 'quickRatio')}")
+    lines.append(f"- **Book Value/Share:** ${safe_get(info, 'bookValue')}")
+
+    # ── CASH FLOW ────────────────────────────────────────────
+    lines.append("\n---\n## CASH FLOW")
+    lines.append(f"- **Operating Cash Flow:** {format_number(safe_get(info, 'operatingCashflow'), prefix='$')}")
+    lines.append(f"- **Free Cash Flow:** {format_number(safe_get(info, 'freeCashflow'), prefix='$')}")
+    lines.append(f"- **FCF/Share:** ${safe_get(info, 'freeCashflow', 0) / safe_get(info, 'sharesOutstanding', 1):.2f}" if isinstance(safe_get(info, 'freeCashflow'), (int,float)) and isinstance(safe_get(info, 'sharesOutstanding'), (int,float)) else "- **FCF/Share:** N/A")
+
+    # Annual cashflow table
+    if not cashflow.empty:
+        lines.append("\n### Annual Cash Flow (Last 4 Years)")
+        lines.append("| Metric | " + " | ".join([str(c.year) if hasattr(c, 'year') else str(c) for c in cashflow.columns[:4]]) + " |")
+        lines.append("|---|" + "---|" * min(4, len(cashflow.columns)) )
+        for idx in cashflow.index[:6]:
+            row = "| " + str(idx) + " | "
+            row += " | ".join([format_number(cashflow.loc[idx, c]) for c in cashflow.columns[:4]])
+            row += " |"
+            lines.append(row)
+
+    # ── SHARES ───────────────────────────────────────────────
+    lines.append("\n---\n## SHARES & DIVIDENDS")
+    lines.append(f"- **Shares Outstanding:** {format_number(safe_get(info, 'sharesOutstanding'))}")
+    lines.append(f"- **Float:** {format_number(safe_get(info, 'floatShares'))}")
+    lines.append(f"- **Shares Short:** {format_number(safe_get(info, 'sharesShort'))}")
+    lines.append(f"- **Short Ratio:** {safe_get(info, 'shortRatio')}")
+    lines.append(f"- **Short % of Float:** {safe_get(info, 'shortPercentOfFloat', 0)*100:.1f}%" if isinstance(safe_get(info, 'shortPercentOfFloat'), float) else "- **Short % of Float:** N/A")
+    lines.append(f"- **Dividend Yield:** {safe_get(info, 'dividendYield', 0)*100:.2f}%" if isinstance(safe_get(info, 'dividendYield'), float) else "- **Dividend Yield:** N/A")
+    lines.append(f"- **Annual Dividend:** ${safe_get(info, 'dividendRate')}")
+    lines.append(f"- **Payout Ratio:** {safe_get(info, 'payoutRatio', 0)*100:.1f}%" if isinstance(safe_get(info, 'payoutRatio'), float) else "- **Payout Ratio:** N/A")
+    lines.append(f"- **5Y Avg Dividend Yield:** {safe_get(info, 'fiveYearAvgDividendYield')}")
+
+    # ── ANNUAL FINANCIALS ────────────────────────────────────
+    if not financials.empty:
+        lines.append("\n---\n## ANNUAL INCOME STATEMENT (Last 4 Years)")
+        cols = financials.columns[:4]
+        lines.append("| Metric | " + " | ".join([str(c.year) if hasattr(c, 'year') else str(c) for c in cols]) + " |")
+        lines.append("|---|" + "---|" * len(cols))
+        for idx in financials.index:
+            row = "| " + str(idx) + " | "
+            row += " | ".join([format_number(financials.loc[idx, c]) for c in cols])
+            row += " |"
+            lines.append(row)
+
+    # ── QUARTERLY FINANCIALS ─────────────────────────────────
+    if not quarterly_financials.empty:
+        lines.append("\n---\n## QUARTERLY INCOME STATEMENT (Last 4 Quarters)")
+        cols = quarterly_financials.columns[:4]
+        lines.append("| Metric | " + " | ".join([str(c.date()) if hasattr(c, 'date') else str(c) for c in cols]) + " |")
+        lines.append("|---|" + "---|" * len(cols))
+        for idx in quarterly_financials.index[:8]:
+            row = "| " + str(idx) + " | "
+            row += " | ".join([format_number(quarterly_financials.loc[idx, c]) for c in cols])
+            row += " |"
+            lines.append(row)
+
+    # ── ANALYST RATINGS ──────────────────────────────────────
+    lines.append("\n---\n## ANALYST DATA")
+    lines.append(f"- **Analyst Recommendation:** {safe_get(info, 'recommendationKey', 'N/A').upper()}")
+    lines.append(f"- **Number of Analysts:** {safe_get(info, 'numberOfAnalystOpinions')}")
+    lines.append(f"- **Target High:** ${safe_get(info, 'targetHighPrice')}")
+    lines.append(f"- **Target Low:** ${safe_get(info, 'targetLowPrice')}")
+    lines.append(f"- **Target Mean:** ${safe_get(info, 'targetMeanPrice')}")
+    lines.append(f"- **Target Median:** ${safe_get(info, 'targetMedianPrice')}")
+
+    if not recommendations.empty:
+        lines.append("\n### Recent Analyst Recommendations")
+        lines.append("| Date | Firm | To Grade | Action |")
+        lines.append("|---|---|---|---|")
+        for idx, row in recommendations.tail(10).iterrows():
+            date = str(idx.date()) if hasattr(idx, 'date') else str(idx)
+            firm = str(row.get('Firm', row.get('firm', 'N/A')))
+            to_grade = str(row.get('To Grade', row.get('toGrade', 'N/A')))
+            action = str(row.get('Action', row.get('action', 'N/A')))
+            lines.append(f"| {date} | {firm} | {to_grade} | {action} |")
+
+    # ── INSTITUTIONAL HOLDERS ────────────────────────────────
+    if not institutional.empty:
+        lines.append("\n---\n## INSTITUTIONAL HOLDERS (Top 10)")
+        lines.append("| Holder | Shares | % Out | Value |")
+        lines.append("|---|---|---|---|")
+        for _, row in institutional.head(10).iterrows():
+            holder = str(row.get('Holder', 'N/A'))
+            shares = format_number(row.get('Shares', 0))
+            pct = f"{row.get('% Out', 0)*100:.2f}%" if isinstance(row.get('% Out'), float) else 'N/A'
+            value = format_number(row.get('Value', 0), prefix='$')
+            lines.append(f"| {holder} | {shares} | {pct} | {value} |")
+
+    # ── OPTIONS DATA ─────────────────────────────────────────
+    lines.append(f"\n---\n## OPTIONS DATA (Nearest Expiry: {options_expiry})")
+
+    if not calls.empty:
+        lines.append("\n### Calls (Near ATM)")
+        lines.append("| Strike | Last | Bid | Ask | Volume | OI | IV |")
+        lines.append("|---|---|---|---|---|---|---|")
+        for _, row in calls.iterrows():
+            lines.append(f"| ${row.get('strike','N/A')} | ${row.get('lastPrice','N/A')} | ${row.get('bid','N/A')} | ${row.get('ask','N/A')} | {row.get('volume','N/A')} | {row.get('openInterest','N/A')} | {row.get('impliedVolatility',0)*100:.1f}% |")
+
+    if not puts.empty:
+        lines.append("\n### Puts (Near ATM)")
+        lines.append("| Strike | Last | Bid | Ask | Volume | OI | IV |")
+        lines.append("|---|---|---|---|---|---|---|")
+        for _, row in puts.iterrows():
+            lines.append(f"| ${row.get('strike','N/A')} | ${row.get('lastPrice','N/A')} | ${row.get('bid','N/A')} | ${row.get('ask','N/A')} | {row.get('volume','N/A')} | {row.get('openInterest','N/A')} | {row.get('impliedVolatility',0)*100:.1f}% |")
+
+    # ── EARNINGS ─────────────────────────────────────────────
+    lines.append("\n---\n## EARNINGS")
+    lines.append(f"- **Next Earnings Date:** {safe_get(info, 'mostRecentQuarter', 'N/A')}")
+    lines.append(f"- **Earnings Growth (YoY):** {safe_get(info, 'earningsGrowth', 0)*100:.1f}%" if isinstance(safe_get(info, 'earningsGrowth'), float) else "- **Earnings Growth:** N/A")
+    lines.append(f"- **Earnings Quarterly Growth:** {safe_get(info, 'earningsQuarterlyGrowth', 0)*100:.1f}%" if isinstance(safe_get(info, 'earningsQuarterlyGrowth'), float) else "- **Earnings Quarterly Growth:** N/A")
+
+    # ── RAW PRICE HISTORY (for technicals.py) ───────────────
+    if not hist_1y.empty:
+        lines.append("\n---\n## PRICE HISTORY (1Y — Last 30 Trading Days)")
+        lines.append("| Date | Open | High | Low | Close | Volume |")
+        lines.append("|---|---|---|---|---|---|")
+        for idx, row in hist_1y.tail(30).iterrows():
+            date = str(idx.date()) if hasattr(idx, 'date') else str(idx)
+            lines.append(f"| {date} | ${row['Open']:.2f} | ${row['High']:.2f} | ${row['Low']:.2f} | ${row['Close']:.2f} | {format_number(row['Volume'])} |")
+
+    lines.append("\n---")
+    lines.append(f"\n*Data fetched: {now} | Run technicals.py and quant.py for full analysis*")
+
+    return "\n".join(lines)
+
+
+def main():
+    if len(sys.argv) < 2:
+        print("Usage: python3 fetch_data.py TICKER")
+        print("Example: python3 fetch_data.py AAPL")
+        sys.exit(1)
+
+    ticker_symbol = sys.argv[1].upper().strip()
+
+    data = fetch_stock_data(ticker_symbol)
+    markdown = build_markdown(data)
+
+    # Save to data directory
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    data_dir = os.path.join(script_dir, '..', 'data')
+    os.makedirs(data_dir, exist_ok=True)
+
+    output_path = os.path.join(data_dir, f"{ticker_symbol}_data.md")
+    with open(output_path, 'w') as f:
+        f.write(markdown)
+
+    print(f"\n✅ Data saved to: data/{ticker_symbol}_data.md")
+    print(f"   Next: python3 scripts/technicals.py {ticker_symbol}")
+
+
+if __name__ == '__main__':
+    main()
